@@ -1,18 +1,43 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+#![feature(const_try)]
+
 use core::cell::UnsafeCell;
-use core::ops::{Deref, DerefMut};
+use core::convert::From;
+use core::default::Default;
+use core::ops::{Deref, DerefMut, Drop};
 use core::sync::atomic::{AtomicUsize, Ordering};
 
-#[derive(Debug)]
+use core::{
+  marker::{Send, Sync},
+  option::Option::{self, None, Some},
+};
+
+use core::clone::Clone;
+
+use core::fmt::Debug;
+use core::result::Result::{self, Err, Ok};
+
 pub struct RwSpin<T> {
   data: UnsafeCell<T>,
   rc: AtomicUsize,
+}
+
+use core::format_args;
+
+impl<T: Debug> Debug for RwSpin<T> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    match self.try_read() {
+      Some(data) => f.write_fmt(format_args!("RwSpin({:?})", &*data)),
+      None => f.write_str("RwLock(<Failed to lock>)"),
+    }
+  }
 }
 
 unsafe impl<T: Send + Sync> Sync for RwSpin<T> {}
 unsafe impl<T: Send> Send for RwSpin<T> {}
 
 impl<T> RwSpin<T> {
-  pub fn new(data: T) -> Self {
+  pub const fn new(data: T) -> Self {
     Self {
       data: UnsafeCell::new(data),
       rc: AtomicUsize::new(0),
@@ -50,36 +75,36 @@ impl<T> RwSpin<T> {
 
   fn load_checked_inc_swap(&self) -> Option<()> {
     let rc = self.rc.load(Ordering::SeqCst);
-    self
+    let _ = self
       .rc
       .compare_exchange(rc, rc.checked_add(1)?, Ordering::SeqCst, Ordering::Relaxed)
-      .ok()
-      .map(|_| ())
+      .ok()?;
+    Some(())
   }
 
   fn load_checked_inc_swap_weak(&self) -> Option<()> {
     let rc = self.rc.load(Ordering::SeqCst);
-    self
+    let _ = self
       .rc
       .compare_exchange_weak(rc, rc.checked_add(1)?, Ordering::SeqCst, Ordering::Relaxed)
-      .ok()
-      .map(|_| ())
+      .ok()?;
+    Some(())
   }
 
   fn swap_exclusive(&self, rc: usize) -> Option<()> {
-    self
+    let _ = self
       .rc
       .compare_exchange(rc, usize::MAX, Ordering::SeqCst, Ordering::Relaxed)
-      .ok()
-      .map(|_| ())
+      .ok()?;
+    Some(())
   }
 
   fn swap_exclusive_weak(&self, rc: usize) -> Option<()> {
-    self
+    let _ = self
       .rc
       .compare_exchange_weak(rc, usize::MAX, Ordering::SeqCst, Ordering::Relaxed)
-      .ok()
-      .map(|_| ())
+      .ok()?;
+    Some(())
   }
 }
 
